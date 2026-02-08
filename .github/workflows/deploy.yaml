@@ -1,0 +1,54 @@
+name: CI Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Docker image
+        run: docker build -t arjunck/docker-react -f Dockerfile.dev .
+      
+      - name: Run tests
+        run: docker run -e CI=true arjunck/docker-react npm run test
+        # Customize: Add --network=host if needed for services
+
+  deploy:
+    needs: test  # Only deploy after tests pass
+    if: github.ref == 'refs/heads/main'  # Matches Travis 'on: branch: main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # Minimal perms
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Create deployment package
+        run: |
+          zip -r deploy.zip . -x "*.git*" "node_modules/*" ".github/*"  # Customize exclusions
+          # Includes Dockerfile, Dockerrun.aws.json if present for EB Docker
+      
+      - name: Deploy to EB
+        uses: einaregilsson/beanstalk-deploy@v21  # Popular action; customizable
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: docker
+          environment_name: docker-env
+          existing_bucket: elasticbeanstalk-us-east-1-923445559289
+          bucket_path: docker
+          version_label: ${{ github.sha }}
+          region: us-east-1
+          deployment_package: deploy.zip
